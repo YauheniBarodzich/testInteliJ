@@ -1,6 +1,7 @@
 package INZ.CNP.Ontology;
 
 import jade.content.Concept;
+import jade.util.leap.List;
 
 /**
  * Created by Mars on 02.11.2017.
@@ -10,7 +11,7 @@ public class Order implements Concept {
     private String executor;
     private String client;
     private String id;
-    private jade.util.leap.List products;
+    private List products;
 
 
     public String getInitiator() {
@@ -45,11 +46,11 @@ public class Order implements Concept {
         this.id = id;
     }
 
-    public jade.util.leap.List getProducts() {
+    public List getProducts() {
         return products;
     }
 
-    public void setProducts(jade.util.leap.List products) {
+    public void setProducts(List products) {
         this.products = products;
     }
 

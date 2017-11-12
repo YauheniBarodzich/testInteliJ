@@ -20,9 +20,13 @@ public interface OrderTradingVocabulary {
 
     public static final String DELIVER = "Deliver";
     public static final String DELIVER_ORDER = "order";
-    public static final String DELIVER_EXECUTOR = "executor";
+    public static final String DELIVER_STOCK = "stock";
 
     public static final String PRODUCT = "Product";
     public static final String PRODUCT_IDP = "idP";
     public static final String PRODUCT_DESCRIPTION = "description";
+
+    public static final String IS_BUSY = "IsBusy";
+    public static final String ISBUSY_CONVERSATION_ID = "conversationID";
+
 }

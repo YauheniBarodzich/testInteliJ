@@ -7,7 +7,7 @@ import jade.content.AgentAction;
  */
 public class Deliver implements AgentAction {
     private Order order;
-    private String executor;
+    private String stock;
 
     public Order getOrder() {
         return order;
@@ -17,11 +17,11 @@ public class Deliver implements AgentAction {
         this.order = order;
     }
 
-    public String getExecutor() {
-        return executor;
+    public String getStock() {
+        return stock;
     }
 
-    public void setExecutor(String executor) {
-        this.executor = executor;
+    public void setStock(String stock) {
+        this.stock = stock;
     }
 }

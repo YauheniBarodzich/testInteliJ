@@ -1,9 +1,7 @@
 package INZ.CNP;
 
-import INZ.CNP.Ontology.Costs;
-import INZ.CNP.Ontology.Order;
-import INZ.CNP.Ontology.OrderTradingOntology;
-import INZ.CNP.Ontology.Product;
+import INZ.CNP.Ontology.*;
+import jade.content.ContentElement;
 import jade.content.ContentManager;
 import jade.content.lang.Codec;
 import jade.content.lang.xml.XMLCodec;
@@ -19,6 +17,7 @@ import jade.proto.ContractNetInitiator;
 import jade.util.leap.*;
 
 import java.util.Vector;
+
 import jade.util.leap.List;
 
 
@@ -35,9 +34,6 @@ public class Coordinator extends Agent {
     private Codec xmlCodec = new XMLCodec();
     //    private Codec codec = new SLCodec();
     private Ontology ontology = OrderTradingOntology.getInstance();
-    Order order;
-    Costs costs;
-    Product product;
 
     protected void setup() {
 
@@ -47,50 +43,26 @@ public class Coordinator extends Agent {
 
         SequentialBehaviour ContactNetProtocol = new SequentialBehaviour(this);
 
+        // Is Agent busy? + send ConvID;
         Behaviour firstPart = new SimpleBehaviour(this) {
             private boolean finished = false;
 
             public void action() {
                 ContentManager manager = myAgent.getContentManager();
 
-                order = new Order();
-
-                order.setClient("myClient");
-                order.setExecutor("myExecutor");
-                order.setInitiator("myInitiator");
-                order.setId("ID_1");
-
-                product = new Product();
-                product.setIdP("ID-Product-1");
-                product.setDescription("some desc");
-
-                List list = new ArrayList();
-
-                list.add(product);
-                order.setProducts(list);
-
-                costs = new Costs();
-                costs.setItem(order);
-                costs.setPrice(33);
-
-                ACLMessage msgConvID = new ACLMessage(ACLMessage.INFORM);
-                msgConvID.setLanguage(XMLCodec.NAME);
-                msgConvID.setOntology(ontology.getName());
-
                 try {
                     getDataStore().put(CONV_ID, genCID());
+                    IsBusy agentAvailability = new IsBusy();
+                    agentAvailability.setConversationID((String) getDataStore().get(CONV_ID));
 
-                    msgConvID.setConversationId((String) getDataStore().get(CONV_ID));
-
-                    System.out.println("C_0: SET CONV ID " + (String) getDataStore().get(CONV_ID));
-
-                    msgConvID.addReceiver(new AID("T_0", AID.ISLOCALNAME));
-                    msgConvID.addReceiver(new AID("T_1", AID.ISLOCALNAME));
-                    msgConvID.addReceiver(new AID("T_2", AID.ISLOCALNAME));
-                    msgConvID.addReceiver(new AID("T_3", AID.ISLOCALNAME));
-                    manager.fillContent(msgConvID, costs);
+                    ACLMessage msgConvID = new ACLMessage(ACLMessage.INFORM);
+                    msgConvID = addReceiversToMessage(msgConvID,4);
+                    msgConvID.setLanguage(XMLCodec.NAME);
+                    msgConvID.setOntology(ontology.getName());
+                    manager.fillContent(msgConvID, agentAvailability);
 
                     send(msgConvID);
+                    System.out.println("KR sent inform msg");
                 } catch (Exception ex) {
                     System.out.println(" Coordinator: ***EXCEPTION***");
                     ex.printStackTrace();
@@ -125,15 +97,23 @@ public class Coordinator extends Agent {
 
             protected Vector prepareCfps(ACLMessage cfp) {
 
+                ContentManager manager = myAgent.getContentManager();
+
+                Deliver deliver = createDeliveryOrder();
+
                 cfp = new ACLMessage(ACLMessage.CFP);
                 cfp.setProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
                 cfp.setConversationId((String) getDataStore().get(CONV_ID));
 
-                cfp.addReceiver(new AID("T_0", AID.ISLOCALNAME));
-                cfp.addReceiver(new AID("T_1", AID.ISLOCALNAME));
-                cfp.addReceiver(new AID("T_2", AID.ISLOCALNAME));
-                cfp.addReceiver(new AID("T_3", AID.ISLOCALNAME));
+                cfp = addReceiversToMessage(cfp, 4);
 
+                try{
+                    cfp.setLanguage(XMLCodec.NAME);
+                    cfp.setOntology(ontology.getName());
+                    manager.fillContent(cfp, deliver);
+                }  catch (Exception ex){
+                    ex.printStackTrace();
+                }
                 Vector v = new Vector();
                 v.add(cfp);
                 return v;
@@ -167,8 +147,10 @@ public class Coordinator extends Agent {
             }
 
             protected void handleAllResponses(Vector responses, Vector acceptances) {
-
                 System.out.println("handleAllResponses() size= " + responses.size());
+
+                ContentManager manager = myAgent.getContentManager();
+                ContentElement content;
 
                 ACLMessage response;
 
@@ -176,15 +158,16 @@ public class Coordinator extends Agent {
 
                     try {
                         response = (ACLMessage) responses.get(i);
+                        content = manager.extractContent(response);
                     } catch (Exception ex) {
                         System.out.println("Exception!");
                         ex.getStackTrace();
                         return;
                     }
 
-                    if (ACLMessage.PROPOSE == response.getPerformative()) {
+                    if (ACLMessage.PROPOSE == response.getPerformative() && content instanceof Costs) {
 
-                        int price = Integer.parseInt(response.getContent());
+                        int price = ((Costs) content).getPrice();
                         if (bestOffer == null || price < bestPrice) {
                             bestOffer = response;
                             bestPrice = price;
@@ -254,4 +237,40 @@ public class Coordinator extends Agent {
         return cidBase + (cidCnt++);
     }
 
+    // --- generate delivery of order ---//
+    public Deliver createDeliveryOrder() {
+
+        Order order = new Order();
+        order.setClient("myClient");
+        order.setExecutor("myExecutor");
+        order.setInitiator("myInitiator");
+        order.setId("ID_1");
+
+        Product product = new Product();
+        product.setIdP("ID-Product-1");
+        product.setDescription("some desc");
+
+        List list = new ArrayList();
+        list.add(product);
+        order.setProducts(list);
+
+        Costs costs = new Costs();
+        costs.setItem(order);
+        costs.setPrice(33);
+
+        Deliver deliveryOfOrder = new Deliver();
+
+        deliveryOfOrder.setOrder(order);
+        deliveryOfOrder.setStock("ST1");
+        return deliveryOfOrder;
+    }
+
+    // --- add Receivers ---//
+    public ACLMessage addReceiversToMessage(ACLMessage msg, int amount) {
+
+        for (int i = 0; i < amount; i++) {
+            msg.addReceiver(new AID("T_" + i, AID.ISLOCALNAME));
+        }
+        return msg;
+    }
 }

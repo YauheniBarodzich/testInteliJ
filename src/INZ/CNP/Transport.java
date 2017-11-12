@@ -1,8 +1,7 @@
 package INZ.CNP;
 
 import INZ.CNP.Behaviour.TransportReponder;
-import INZ.CNP.Ontology.Costs;
-import INZ.CNP.Ontology.OrderTradingOntology;
+import INZ.CNP.Ontology.*;
 import jade.content.Concept;
 import jade.content.ContentElement;
 import jade.content.ContentManager;
@@ -72,33 +71,39 @@ public class Transport extends Agent {
                     ACLMessage msg = receive(MessageTemplate.MatchPerformative(ACLMessage.INFORM));
 
                     if (msg != null) {
+                        System.out.println("TR get INFORM msg");
                         ContentManager manager = myAgent.getContentManager();
 
                         try {
-//                            System.out.println("MSG: " + msg);
                             ContentElement content = manager.extractContent(msg);
-                            System.out.println("CONTENT: " + content);
-
 
                             if (content instanceof Costs) {
-//                                System.out.println("Content is instance of COSTS");
 
                                 Costs costs = (Costs) content;
                                 getDataStore().put(RECV_MSG, msg);
-//                                System.out.println("msg.getConversationId ======= " + msg);
                                 getDataStore().put(CONV_ID, msg.getConversationId());
-//                                System.out.println("msg.getConversationId22222 ======= " + getDataStore().get(CONV_ID));
 
                                 finished = true;
-                            } else {
-                                System.out.println("Content isn't instance of COSTS");
+                            } else if (content instanceof Deliver) {
+
+                                Deliver deliver = (Deliver) content;
+                                getDataStore().put(RECV_MSG, msg);
+                                getDataStore().put(CONV_ID, msg.getConversationId());
+
+                                finished = true;
+                            } else if (content instanceof IsBusy) {
+                                System.out.println("TR: IsBusy instance");
+
+                                IsBusy isBusyContent = (IsBusy) content;
+                                getDataStore().put(RECV_MSG, msg);
+                                getDataStore().put(CONV_ID, isBusyContent.getConversationID());
+                                finished = true;
                             }
 
                         } catch (Exception ex) {
                             System.out.println(" Transport: ***END EXCEPTION***");
                             ex.printStackTrace();
                         }
-
                     } else {
                         block();
                     }
@@ -113,23 +118,55 @@ public class Transport extends Agent {
             ContractNetProtocol.addSubBehaviour(firtPartCNP);
 
             Behaviour secPartCNP = new ContractNetResponder(myAgent,
-                    MessageTemplate.and( MessageTemplate.MatchPerformative(ACLMessage.CFP), MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET))) {
+                    MessageTemplate.and(MessageTemplate.MatchPerformative(ACLMessage.CFP), MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET))) {
                 //            addBehaviour(new ContractNetResponder(myAgent, templateCFP) {
 
                 @Override
                 protected ACLMessage handleCfp(ACLMessage cfp) {
-                    System.out.println(myAgent.getLocalName() + ": Handle CFP.ID conversation: " + ((ACLMessage) getDataStore().get("received-message")).getContent());
+                    System.out.println(myAgent.getLocalName() + ": Handle CFP");
 
                     ACLMessage reply = cfp.createReply();
+
                     // TODO create conditions to accept
                     if (getDataStore().get(CONV_ID).equals(cfp.getConversationId())) {
-                        System.out.println(myAgent.getLocalName() + ": Send PROPOSE");
-                        reply.setPerformative(ACLMessage.PROPOSE);
-                        reply.setContent("" + rnd.nextInt(100));
+
+                        ContentManager manager = myAgent.getContentManager();
+
+                        try {
+                            ContentElement content = manager.extractContent(cfp);
+
+                            if (content instanceof Deliver) {
+                                System.out.println(myAgent.getLocalName() + ": Send PROPOSE");
+
+                                Deliver deliver = (Deliver) content;
+                                Order order = deliver.getOrder();
+                                // TODO criteries to accept or reject CFP
+                                if (true) {
+                                    Costs costs = new Costs();
+                                    costs.setItem(order);
+                                    costs.setPrice(rnd.nextInt(100));
+                                    reply.setPerformative(ACLMessage.PROPOSE);
+                                    reply.setProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
+                                    try {
+                                        reply.setLanguage(XMLCodec.NAME);
+                                        reply.setOntology(ontology.getName());
+                                        manager.fillContent(reply, costs);
+                                    } catch (Exception ex) {
+                                        ex.printStackTrace();
+                                    }
+
+                                } else {
+                                }
+                            }
+                        } catch (Exception ex) {
+                            ex.printStackTrace();
+                        }
+
                     } else {
                         System.out.println("Send REFUSE");
                         reply.setPerformative(ACLMessage.REFUSE);
                     }
+
                     return reply;
                 }
 
