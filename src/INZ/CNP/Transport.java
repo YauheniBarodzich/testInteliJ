@@ -1,28 +1,22 @@
 package INZ.CNP;
 
-import INZ.CNP.Behaviour.TransportReponder;
 import INZ.CNP.Ontology.*;
-import jade.content.Concept;
 import jade.content.ContentElement;
 import jade.content.ContentManager;
-import jade.content.Predicate;
 import jade.content.lang.Codec;
 import jade.content.lang.sl.SLCodec;
 import jade.content.lang.xml.XMLCodec;
 import jade.content.onto.Ontology;
 import jade.core.Agent;
 import jade.core.behaviours.*;
-import jade.domain.FIPAAgentManagement.FailureException;
-import jade.domain.FIPAAgentManagement.NotUnderstoodException;
-import jade.domain.FIPAAgentManagement.RefuseException;
+import jade.domain.DFService;
+import jade.domain.FIPAAgentManagement.*;
+import jade.domain.FIPAException;
 import jade.domain.FIPANames;
 import jade.lang.acl.ACLMessage;
 import jade.lang.acl.MessageTemplate;
 import jade.proto.ContractNetResponder;
-import org.omg.PortableInterceptor.SYSTEM_EXCEPTION;
 
-import javax.xml.crypto.Data;
-import java.util.Date;
 import java.util.Random;
 
 /**
@@ -35,11 +29,15 @@ public class Transport extends Agent {
 
     private Codec xmlCodec = new XMLCodec();
     private Codec codec = new SLCodec();
-    private Ontology ontology = OrderTradingOntology.getInstance();
+    private Ontology OrderOntology = OrderTradingOntology.getInstance();
+    private ContentManager manager;
+
 
     protected void setup() {
         getContentManager().registerLanguage(xmlCodec);
-        getContentManager().registerOntology(ontology);
+        getContentManager().registerOntology(OrderOntology);
+
+        registerService();
 
         addBehaviour(new Transaction());
     }
@@ -53,17 +51,13 @@ public class Transport extends Agent {
                 MessageTemplate.MatchPerformative(ACLMessage.CFP));
         MessageTemplate templateCFPConvID;
         boolean TransactionFinished = false;
-
+        ContentManager manager;
 
         public void action() {
 
-            // 1. sequential Behaviour(get CID) with time out
-            // 1.1 when timeout -> restart
-            // 1.2 in time -> set up CNP
-
             SequentialBehaviour ContractNetProtocol = new SequentialBehaviour(myAgent);
             addBehaviour(ContractNetProtocol);
-            Behaviour firtPartCNP = new SimpleBehaviour(myAgent) {
+            Behaviour firstPartCNP = new SimpleBehaviour(myAgent) {
 
                 private boolean finished = false;
 
@@ -71,33 +65,22 @@ public class Transport extends Agent {
                     ACLMessage msg = receive(MessageTemplate.MatchPerformative(ACLMessage.INFORM));
 
                     if (msg != null) {
-                        System.out.println("TR get INFORM msg");
-                        ContentManager manager = myAgent.getContentManager();
+                        System.out.println(myAgent.getLocalName() + ": get INFORM msg");
 
                         try {
+                            manager = myAgent.getContentManager();
                             ContentElement content = manager.extractContent(msg);
 
-                            if (content instanceof Costs) {
-
-                                Costs costs = (Costs) content;
-                                getDataStore().put(RECV_MSG, msg);
-                                getDataStore().put(CONV_ID, msg.getConversationId());
-
-                                finished = true;
-                            } else if (content instanceof Deliver) {
-
-                                Deliver deliver = (Deliver) content;
-                                getDataStore().put(RECV_MSG, msg);
-                                getDataStore().put(CONV_ID, msg.getConversationId());
-
-                                finished = true;
-                            } else if (content instanceof IsBusy) {
-                                System.out.println("TR: IsBusy instance");
+                            if (content instanceof IsBusy) {
+                                System.out.println(myAgent.getLocalName() + ": IsBusy instance");
 
                                 IsBusy isBusyContent = (IsBusy) content;
                                 getDataStore().put(RECV_MSG, msg);
                                 getDataStore().put(CONV_ID, isBusyContent.getConversationID());
+
                                 finished = true;
+                            } else {
+                                System.out.println(myAgent.getLocalName() + ": isn't instance of IsBusy.class");
                             }
 
                         } catch (Exception ex) {
@@ -114,59 +97,60 @@ public class Transport extends Agent {
                 }
             };
 
-            firtPartCNP.setDataStore(ContractNetProtocol.getDataStore());
-            ContractNetProtocol.addSubBehaviour(firtPartCNP);
+            firstPartCNP.setDataStore(ContractNetProtocol.getDataStore());
+            ContractNetProtocol.addSubBehaviour(firstPartCNP);
 
             Behaviour secPartCNP = new ContractNetResponder(myAgent,
-                    MessageTemplate.and(MessageTemplate.MatchPerformative(ACLMessage.CFP), MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET))) {
-                //            addBehaviour(new ContractNetResponder(myAgent, templateCFP) {
+                    MessageTemplate.and(MessageTemplate.MatchPerformative(ACLMessage.CFP),
+                            MessageTemplate.MatchProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET))) {
 
-                @Override
                 protected ACLMessage handleCfp(ACLMessage cfp) {
                     System.out.println(myAgent.getLocalName() + ": Handle CFP");
 
                     ACLMessage reply = cfp.createReply();
 
-                    // TODO create conditions to accept
-                    if (getDataStore().get(CONV_ID).equals(cfp.getConversationId())) {
-
-                        ContentManager manager = myAgent.getContentManager();
-
-                        try {
-                            ContentElement content = manager.extractContent(cfp);
-
-                            if (content instanceof Deliver) {
-                                System.out.println(myAgent.getLocalName() + ": Send PROPOSE");
-
-                                Deliver deliver = (Deliver) content;
-                                Order order = deliver.getOrder();
-                                // TODO criteries to accept or reject CFP
-                                if (true) {
-                                    Costs costs = new Costs();
-                                    costs.setItem(order);
-                                    costs.setPrice(rnd.nextInt(100));
-                                    reply.setPerformative(ACLMessage.PROPOSE);
-                                    reply.setProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
-                                    try {
-                                        reply.setLanguage(XMLCodec.NAME);
-                                        reply.setOntology(ontology.getName());
-                                        manager.fillContent(reply, costs);
-                                    } catch (Exception ex) {
-                                        ex.printStackTrace();
-                                    }
-
-                                } else {
-                                }
-                            }
-                        } catch (Exception ex) {
-                            ex.printStackTrace();
-                        }
-
-                    } else {
-                        System.out.println("Send REFUSE");
+                    if (!getDataStore().get((String) CONV_ID).equals(cfp.getConversationId())) {
                         reply.setPerformative(ACLMessage.REFUSE);
+                        return reply;
                     }
 
+                    try {
+                        ContentElement content = manager.extractContent(cfp);
+
+                        if (content instanceof Deliver) {
+                            System.out.println(myAgent.getLocalName() + ": Send PROPOSE");
+
+                            Deliver deliver = (Deliver) content;
+                            Order order = deliver.getOrder();
+                            // TODO criteries to accept or reject CFP
+                            if (true) {
+                                Costs costs = new Costs();
+                                costs.setItem(order);
+                                costs.setPrice(rnd.nextInt(100));
+                                reply.setPerformative(ACLMessage.PROPOSE);
+                                reply.setProtocol(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
+                                try {
+                                    reply.setLanguage(XMLCodec.NAME);
+                                    reply.setOntology(OrderOntology.getName());
+                                    manager.fillContent(reply, costs);
+                                } catch (Exception ex) {
+                                    ex.printStackTrace();
+                                }
+
+                            } else {
+                                System.out.println("Send REFUSE");
+                            }
+                        }
+                    } catch (Exception ex) {
+                        ex.printStackTrace();
+                    }
+//                    // TODO create conditions to accept
+//                    if (getDataStore().get(CONV_ID).equals(cfp.getConversationId())) {
+//
+//                    } else {
+//                        System.out.println("Send REFUSE");
+//                        reply.setPerformative(ACLMessage.REFUSE);
+//                    }
                     return reply;
                 }
 
@@ -187,14 +171,56 @@ public class Transport extends Agent {
                     return reply;
                 }
 
+
             };
 
             secPartCNP.setDataStore(ContractNetProtocol.getDataStore());
             ContractNetProtocol.addSubBehaviour(secPartCNP);
         }
 
+        public int onEnd() {
+            reset();
+            myAgent.addBehaviour(this);
+            return 0;
+        }
+
         public boolean done() {
             return TransactionFinished;
+        }
+    }
+
+    public void registerService() {
+        System.out.println(this.getLocalName() + ": registerService()");
+
+        // Register deliver service in yellow pages
+        DFAgentDescription agentDescription = new DFAgentDescription();
+        agentDescription.setName(getAID());
+        agentDescription.addLanguages(xmlCodec.getName());
+        agentDescription.addOntologies(OrderOntology.getName());
+        agentDescription.addProtocols(FIPANames.InteractionProtocol.FIPA_CONTRACT_NET);
+
+        ServiceDescription serviceDescription = new ServiceDescription();
+        serviceDescription.setType("DELIVER");
+        serviceDescription.setName(getLocalName() + "-DELIVER");
+
+        agentDescription.addServices(serviceDescription);
+
+        try {
+            DFService.register(this, agentDescription);
+        } catch (FIPAException fe) {
+            fe.printStackTrace();
+        }
+        return;
+    }
+
+    @Override
+    protected void takeDown() {
+        super.takeDown();
+        // Deregister from yellow pages
+        try {
+            DFService.deregister(this);
+        } catch (FIPAException fe) {
+            fe.printStackTrace();
         }
     }
 
