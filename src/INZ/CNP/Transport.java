@@ -1,5 +1,6 @@
 package INZ.CNP;
 
+import INZ.Agent.Behaviour.DelayBehaviour;
 import INZ.CNP.Ontology.*;
 import jade.content.ContentElement;
 import jade.content.ContentManager;
@@ -56,7 +57,9 @@ public class Transport extends Agent {
         public void action() {
 
             SequentialBehaviour ContractNetProtocol = new SequentialBehaviour(myAgent);
+
             addBehaviour(ContractNetProtocol);
+
             Behaviour firstPartCNP = new SimpleBehaviour(myAgent) {
 
                 private boolean finished = false;

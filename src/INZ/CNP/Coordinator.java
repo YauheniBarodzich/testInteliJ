@@ -16,9 +16,12 @@ import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
 import jade.domain.FIPANames;
 import jade.lang.acl.ACLMessage;
+import jade.lang.acl.MessageTemplate;
 import jade.proto.ContractNetInitiator;
+import jade.proto.SubscriptionInitiator;
 import jade.util.leap.*;
 
+import java.util.Date;
 import java.util.Timer;
 import java.util.Vector;
 
@@ -42,6 +45,12 @@ public class Coordinator extends Agent {
     private List TransportAgentList = new ArrayList();
 
     protected void setup() {
+//////////////////*************************///////////////////////
+        ACLMessage DFmessage = createACLSubscribeMessage(this);
+        Behaviour b = new SubscribeBehaviour(this, DFmessage);
+        addBehaviour(b);
+//////////////////*************************///////////////////////
+
 
         // Update list of agent Tranport every 1s
         addBehaviour(new getAgentsBehaviour(this));
@@ -115,11 +124,11 @@ public class Coordinator extends Agent {
 
                 cfp = addReceiversToMessage(cfp, TransportAgentList);
 
-                try{
+                try {
                     cfp.setLanguage(XMLCodec.NAME);
                     cfp.setOntology(ontology.getName());
                     manager.fillContent(cfp, deliver);
-                }  catch (Exception ex){
+                } catch (Exception ex) {
                     ex.printStackTrace();
                 }
                 Vector v = new Vector();
@@ -200,21 +209,74 @@ public class Coordinator extends Agent {
         addBehaviour(ContactNetProtocol);
     }
 
-    // "Get agent form yellow pages" Behaviour
-    class getAgentsBehaviour extends OneShotBehaviour{
+    /*********** Subscribe behaviour **********/
+    public ACLMessage createACLSubscribeMessage(Agent agent){
+        DFAgentDescription template = new DFAgentDescription();
+        ServiceDescription serviceDescription = new ServiceDescription();
+
+        serviceDescription.setType("DELIVER");
+        template.addOntologies(ontology.getName());
+        template.addLanguages(xmlCodec.getName());
+
+        template.addServices(serviceDescription);
+
+        return DFService.createSubscriptionMessage(agent, getDefaultDF(), template, null);
+    }
+
+    //
+    class SubscribeBehaviour extends SubscriptionInitiator {
+        SubscribeBehaviour(Agent agent, ACLMessage msg) {
+            super(agent, msg);
+        }
+        // get code form https://www.programcreek.com
+        protected void handleInform(ACLMessage inform) {
+            System.out.println("***** Agent "+getLocalName()+": Notification received from DF ******");
+            try {
+                DFAgentDescription[] results = DFService.decodeNotification(inform.getContent());
+                if (results.length > 0) {
+                    for (int i = 0; i < results.length; ++i) {
+                        DFAgentDescription dfd = results[i];
+                        AID provider = dfd.getName();
+                        // The same agent may provide several services; we are only interested
+                        // in the weather-forcast one
+                        Iterator it = dfd.getAllServices();
+                        while (it.hasNext()) {
+                            ServiceDescription sd = (ServiceDescription) it.next();
+//                            if (sd.getType().equals("weather-forecast")) {
+//                                System.out.println("Weather-forecast service for Italy found:");
+                                System.out.println("- Service \""+sd.getName()+"\" provided by agent "+provider.getName());
+//                            }
+                        }
+                    }
+                } else {
+                    System.out.println("*** size is < 0");
+                }
+                System.out.println();
+            }
+            catch (FIPAException fe) {
+                fe.printStackTrace();
+            }
+        }
+
+    }
+
+
+    //********* "Get agent form yellow pages" Behaviour **************/
+
+    class getAgentsBehaviour extends OneShotBehaviour {
 //
 //        public getAgentsBehaviour(Agent agent, long period){
 //            super(agent, period);
 //        }
 
-        getAgentsBehaviour(Agent agent){
+        getAgentsBehaviour(Agent agent) {
             super(agent);
         }
 
         @Override
         public void action() {
             //Update list of Transport agents
-            System.out.println(myAgent.getLocalName() +  ": onTick()");
+            System.out.println(myAgent.getLocalName() + ": onTick()");
 
             DFAgentDescription template = new DFAgentDescription();
             ServiceDescription serviceDescription = new ServiceDescription();
@@ -225,16 +287,16 @@ public class Coordinator extends Agent {
 
             template.addServices(serviceDescription);
 
-            try{
-                DFAgentDescription[] result = DFService.search(myAgent,template);
+            try {
+                DFAgentDescription[] result = DFService.search(myAgent, template);
                 System.out.println(result.length);
                 TransportAgentList.clear();
 
-                for(int i = 0; i< result.length; i++) {
+                for (int i = 0; i < result.length; i++) {
                     System.out.println(result[i].getName());
                     TransportAgentList.add(result[i].getName());
                 }
-            }catch(FIPAException fe){
+            } catch (FIPAException fe) {
                 fe.printStackTrace();
             }
         }
