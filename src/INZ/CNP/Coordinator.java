@@ -1,6 +1,5 @@
 package INZ.CNP;
 
-import INZ.Agent.Behaviour.DelayBehaviour;
 import INZ.CNP.Ontology.*;
 import jade.content.ContentElement;
 import jade.content.ContentManager;
@@ -16,13 +15,10 @@ import jade.domain.FIPAAgentManagement.ServiceDescription;
 import jade.domain.FIPAException;
 import jade.domain.FIPANames;
 import jade.lang.acl.ACLMessage;
-import jade.lang.acl.MessageTemplate;
 import jade.proto.ContractNetInitiator;
 import jade.proto.SubscriptionInitiator;
 import jade.util.leap.*;
 
-import java.util.Date;
-import java.util.Timer;
 import java.util.Vector;
 
 import jade.util.leap.List;
@@ -34,31 +30,29 @@ import jade.util.leap.List;
 
 // -- Initiator of CNP -- //
 
-public class Coordinator extends Agent {
-
-    public static final String CONV_ID = "conversation-id";
+public class Coordinator extends Agent implements AgentVocabulary {
 
     private Codec xmlCodec = new XMLCodec();
-    //    private Codec codec = new SLCodec();
     private Ontology ontology = OrderTradingOntology.getInstance();
 
     private List TransportAgentList = new ArrayList();
 
     protected void setup() {
-//////////////////*************************///////////////////////
-        ACLMessage DFmessage = createACLSubscribeMessage(this);
-        Behaviour b = new SubscribeBehaviour(this, DFmessage);
-        addBehaviour(b);
-//////////////////*************************///////////////////////
-
-
-        // Update list of agent Tranport every 1s
-        addBehaviour(new getAgentsBehaviour(this));
 
         getContentManager().registerLanguage(xmlCodec);
         getContentManager().registerOntology(ontology);
 
+        ParallelBehaviour mainPallel = new ParallelBehaviour(this, ParallelBehaviour.WHEN_ALL);
         SequentialBehaviour ContactNetProtocol = new SequentialBehaviour(this);
+
+
+//************************** DF Subscription Services  **************************************
+        ACLMessage DFmessage = createACLSubscribeMessage(this, "DELIVER", ontology.getName(), xmlCodec.getName());
+        Behaviour updateTransportList = new SubscribeCoordinatorInitiator(this, DFmessage, "DELIVER");
+//*******************************************************************************************
+
+        // Update list of agent Tranport every 1s
+        //addBehaviour(new getAgentsBehaviour(this));
 
         // Is Agent busy? + send ConvID;
         Behaviour firstPart = new SimpleBehaviour(this) {
@@ -79,23 +73,11 @@ public class Coordinator extends Agent {
                     manager.fillContent(msgConvID, agentAvailability);
 
                     send(msgConvID);
-                    System.out.println("KR sent inform msg");
+                    System.out.println(myAgent.getLocalName() + ": sent (INFORM) Predicate IsBusy");
                 } catch (Exception ex) {
-                    System.out.println(" Coordinator: ***EXCEPTION***");
+                    System.out.println(myAgent.getLocalName() + ":  ***EXCEPTION***");
                     ex.printStackTrace();
                 }
-//                msgConvID.setContent(genCID());
-//                msgConvID.addReceiver(new AID("T_0", AID.ISLOCALNAME));
-//                msgConvID.addReceiver(new AID("T_1", AID.ISLOCALNAME));
-//                msgConvID.addReceiver(new AID("T_2", AID.ISLOCALNAME));
-//
-//                send(msgConvID);
-//
-//                msgConvID = new ACLMessage(ACLMessage.INFORM);
-//                msgConvID.setContent(genCID());
-//                msgConvID.addReceiver(new AID("T_3", AID.ISLOCALNAME));
-//
-//                send(msgConvID);
                 finished = true;
             }
 
@@ -104,8 +86,8 @@ public class Coordinator extends Agent {
             }
         };
 
+
         firstPart.setDataStore(ContactNetProtocol.getDataStore());
-        ContactNetProtocol.addSubBehaviour(firstPart);
 
         Behaviour secPart = new ContractNetInitiator(this, null) {
 
@@ -202,35 +184,46 @@ public class Coordinator extends Agent {
                 }
             }
         };
-
         secPart.setDataStore(ContactNetProtocol.getDataStore());
+
+        ContactNetProtocol.addSubBehaviour(firstPart);
         ContactNetProtocol.addSubBehaviour(secPart);
 
-        addBehaviour(ContactNetProtocol);
+        mainPallel.addSubBehaviour(updateTransportList);
+        mainPallel.addSubBehaviour(ContactNetProtocol);
+        addBehaviour(mainPallel);
     }
 
     /*********** Subscribe behaviour **********/
-    public ACLMessage createACLSubscribeMessage(Agent agent){
+    public ACLMessage createACLSubscribeMessage(Agent agent, String type, String ontologyName, String languageName) {
         DFAgentDescription template = new DFAgentDescription();
         ServiceDescription serviceDescription = new ServiceDescription();
 
-        serviceDescription.setType("DELIVER");
-        template.addOntologies(ontology.getName());
-        template.addLanguages(xmlCodec.getName());
-
+//        serviceDescription.setType("DELIVER");
+        serviceDescription.setType(type);
+//        template.addOntologies(ontology.getName());
+        template.addOntologies(ontologyName);
+//        template.addLanguages(xmlCodec.getName());
+        template.addLanguages(languageName);
         template.addServices(serviceDescription);
 
         return DFService.createSubscriptionMessage(agent, getDefaultDF(), template, null);
     }
 
-    //
-    class SubscribeBehaviour extends SubscriptionInitiator {
-        SubscribeBehaviour(Agent agent, ACLMessage msg) {
+
+    /********* "Get agent form yellow pages" Behaviour **************/
+    class SubscribeCoordinatorInitiator extends SubscriptionInitiator {
+
+        String serviceType;
+
+        SubscribeCoordinatorInitiator(Agent agent, ACLMessage msg, String service) {
             super(agent, msg);
+            this.serviceType = service;
         }
+
         // get code form https://www.programcreek.com
         protected void handleInform(ACLMessage inform) {
-            System.out.println("***** Agent "+getLocalName()+": Notification received from DF ******");
+            System.out.println("***** Agent " + getLocalName() + ": Notification received from DF ******");
             try {
                 DFAgentDescription[] results = DFService.decodeNotification(inform.getContent());
                 if (results.length > 0) {
@@ -238,69 +231,63 @@ public class Coordinator extends Agent {
                         DFAgentDescription dfd = results[i];
                         AID provider = dfd.getName();
                         // The same agent may provide several services; we are only interested
-                        // in the weather-forcast one
                         Iterator it = dfd.getAllServices();
                         while (it.hasNext()) {
                             ServiceDescription sd = (ServiceDescription) it.next();
-//                            if (sd.getType().equals("weather-forecast")) {
-//                                System.out.println("Weather-forecast service for Italy found:");
-                                System.out.println("- Service \""+sd.getName()+"\" provided by agent "+provider.getName());
-//                            }
+                            if (sd.getType().equals(serviceType)) {
+                                System.out.println("Service: " + sd.getName() + " found. Provided by agent " + provider.getName());
+                                TransportAgentList.add(sd.getName());
+                            }
                         }
                     }
                 } else {
                     System.out.println("*** size is < 0");
                 }
-                System.out.println();
-            }
-            catch (FIPAException fe) {
-                fe.printStackTrace();
-            }
-        }
-
-    }
-
-
-    //********* "Get agent form yellow pages" Behaviour **************/
-
-    class getAgentsBehaviour extends OneShotBehaviour {
-//
-//        public getAgentsBehaviour(Agent agent, long period){
-//            super(agent, period);
-//        }
-
-        getAgentsBehaviour(Agent agent) {
-            super(agent);
-        }
-
-        @Override
-        public void action() {
-            //Update list of Transport agents
-            System.out.println(myAgent.getLocalName() + ": onTick()");
-
-            DFAgentDescription template = new DFAgentDescription();
-            ServiceDescription serviceDescription = new ServiceDescription();
-
-            serviceDescription.setType("DELIVER");
-            template.addOntologies(ontology.getName());
-            template.addLanguages(xmlCodec.getName());
-
-            template.addServices(serviceDescription);
-
-            try {
-                DFAgentDescription[] result = DFService.search(myAgent, template);
-                System.out.println(result.length);
-                TransportAgentList.clear();
-
-                for (int i = 0; i < result.length; i++) {
-                    System.out.println(result[i].getName());
-                    TransportAgentList.add(result[i].getName());
-                }
             } catch (FIPAException fe) {
                 fe.printStackTrace();
             }
         }
+
     }
+
+//    class getAgentsBehaviour extends OneShotBehaviour {
+////
+////        public getAgentsBehaviour(Agent agent, long period){
+////            super(agent, period);
+////        }
+//
+//        getAgentsBehaviour(Agent agent) {
+//            super(agent);
+//        }
+//
+//        @Override
+//        public void action() {
+//            //Update list of Transport agents
+//            System.out.println(myAgent.getLocalName() + ": onTick()");
+//
+//            DFAgentDescription template = new DFAgentDescription();
+//            ServiceDescription serviceDescription = new ServiceDescription();
+//
+//            serviceDescription.setType("DELIVER");
+//            template.addOntologies(ontology.getName());
+//            template.addLanguages(xmlCodec.getName());
+//
+//            template.addServices(serviceDescription);
+//
+//            try {
+//                DFAgentDescription[] result = DFService.search(myAgent, template);
+//                System.out.println(result.length);
+//                TransportAgentList.clear();
+//
+//                for (int i = 0; i < result.length; i++) {
+//                    System.out.println(result[i].getName());
+//                    TransportAgentList.add(result[i].getName());
+//                }
+//            } catch (FIPAException fe) {
+//                fe.printStackTrace();
+//            }
+//        }
+//    }
 
     //  --- generating Conversation IDs -------------------
 
@@ -346,6 +333,10 @@ public class Coordinator extends Agent {
     // --- add Receivers ---//
     public ACLMessage addReceiversToMessage(ACLMessage msg, List receivers) {
 
+        if(receivers.size() == 0)
+        {
+            System.out.println("receivers TR amount == 0");
+        }
         for (int i = 0; i < receivers.size(); i++) {
             msg.addReceiver((AID) receivers.get(i));
             System.out.println(this.getLocalName() + ": " + (AID) receivers.get(i));
